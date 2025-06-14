@@ -10,7 +10,7 @@ export default function Facturar() {
 
   const [clienteId, setClienteId] = useState('');
   const [items, setItems] = useState([{ productoId: '', cantidad: 1 }]);
-  const [busquedas, setBusquedas] = useState(['']); // para el input de búsqueda de cada item
+  const [busquedas, setBusquedas] = useState(['']);
   const [editId, setEditId] = useState(null);
   const [aplicarIVA, setAplicarIVA] = useState(false);
 
@@ -35,11 +35,7 @@ export default function Facturar() {
 
   const handleItemChange = (index, field, value) => {
     const nuevosItems = [...items];
-    if (field === 'cantidad') {
-      nuevosItems[index][field] = Number(value);
-    } else {
-      nuevosItems[index][field] = value;
-    }
+    nuevosItems[index][field] = field === 'cantidad' ? Number(value) : value;
     setItems(nuevosItems);
   };
 
@@ -48,7 +44,6 @@ export default function Facturar() {
     nuevasBusquedas[index] = valor;
     setBusquedas(nuevasBusquedas);
 
-    // Cuando el usuario borra el texto, limpiar el producto seleccionado también
     if (!valor) {
       handleItemChange(index, 'productoId', '');
     }
@@ -61,18 +56,18 @@ export default function Facturar() {
     setBusquedas(nuevasBusquedas.length ? nuevasBusquedas : ['']);
   };
 
+  // ✅ Subtotal SIN IVA
   const calcularSubtotal = () => {
     return items.reduce((total, item) => {
       const prod = productos.find(p => p.id === item.productoId);
       if (!prod) return total;
-      const precioBase = aplicarIVA ? prod.precio * 1.22 : prod.precio;
-      return total + precioBase * item.cantidad;
+      return total + prod.precio * item.cantidad;
     }, 0);
   };
 
   const subtotal = calcularSubtotal();
-  const IVA = aplicarIVA ? subtotal * 0.22 / 1.22 : 0; // IVA aplicado solo si está marcado
-  const total = subtotal;
+  const IVA = aplicarIVA ? subtotal * 0.22 : 0;
+  const total = subtotal + IVA;
 
   const handleSubmit = async (e) => {
     e.preventDefault();

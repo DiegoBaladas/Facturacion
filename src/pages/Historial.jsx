@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { obtenerFacturas } from '../data/facturas';
+import { obtenerFacturas, eliminarFactura } from '../data/facturas';
 import { obtenerClientes } from '../firebase/clientes';
 import { obtenerProductos } from '../data/productos';
 import jsPDF from 'jspdf';
@@ -11,9 +11,15 @@ export default function Historial() {
   const [facturaDetalle, setFacturaDetalle] = useState(null);
 
   useEffect(() => {
-    obtenerFacturas().then(setFacturas);
-    obtenerClientes().then(setClientes);
-    obtenerProductos().then(setProductos);
+    async function fetchData() {
+      const f = await obtenerFacturas();
+      const c = await obtenerClientes();
+      const p = await obtenerProductos();
+      setFacturas(f);
+      setClientes(c);
+      setProductos(p);
+    }
+    fetchData();
   }, []);
 
   const nombreCliente = (id) => {
@@ -21,115 +27,85 @@ export default function Historial() {
     return c ? c.nombre : '';
   };
 
-  const productoInfo = (id) => {
-    return productos.find(p => p.id === id);
+  const handleEliminar = async (id) => {
+    if (window.confirm('¿Seguro que querés eliminar esta factura?')) {
+      await eliminarFactura(id);
+      const nuevasFacturas = await obtenerFacturas();
+      setFacturas(nuevasFacturas);
+      setFacturaDetalle(null);
+    }
   };
 
-  const mostrarDetalle = (factura) => {
-    setFacturaDetalle(factura);
-  };
+  const generarPDF = (factura) => {
+  const doc = new jsPDF();
+  const cliente = clientes.find(c => c.id === factura.clienteId);
+  const nombreCliente = cliente ? cliente.nombre : '';
 
-  const cerrarDetalle = () => {
-    setFacturaDetalle(null);
-  };
+  // Encabezado azul
+  doc.setFillColor(33, 150, 243); // Azul
+  doc.rect(0, 0, 210, 30, 'F');
+  doc.setFontSize(18);
+  doc.setTextColor(255);
+  doc.text('Factura', 105, 18, { align: 'center' });
 
-  const exportarPDF = () => {
-    if (!facturaDetalle) return;
+  // Información del cliente
+  doc.setTextColor(0);
+  doc.setFontSize(12);
+  doc.text(`Cliente: ${nombreCliente}`, 14, 40);
+  doc.text(`Fecha: ${new Date(factura.fecha).toLocaleDateString()}`, 14, 48);
 
-    const doc = new jsPDF({ unit: 'pt', format: 'a4' });
-    const margin = 40;
-    let y = margin;
+  // Cabecera de tabla
+  let y = 60;
+  doc.setFillColor(230);
+  doc.rect(14, y - 6, 182, 8, 'F');
+  doc.setFontSize(11);
+  doc.text('Producto', 16, y);
+  doc.text('Cantidad', 76, y);
+  doc.text('Precio Unitario', 116, y);
+  doc.text('Subtotal', 166, y);
 
-    // Título
-    doc.setFontSize(22);
-    doc.setFont('helvetica', 'bold');
-    doc.text('Factura', margin, y);
+  // Detalles de productos
+  y += 6;
+  factura.items.forEach((item) => {
+    const prod = productos.find(p => p.id === item.productoId);
+    if (!prod) return;
+    const precioUnitario = prod.precio;
+    const subtotalLinea = precioUnitario * item.cantidad;
 
-    y += 30;
+    // Marco para la fila
+    doc.rect(14, y - 5, 182, 8);
+    doc.text(prod.nombre, 16, y);
+    doc.text(String(item.cantidad), 76, y);
+    doc.text(`$${precioUnitario.toFixed(2)}`, 116, y);
+    doc.text(`$${subtotalLinea.toFixed(2)}`, 166, y);
+    y += 10;
+  });
 
-    // Datos cliente y fecha
-    doc.setFontSize(12);
-    doc.setFont('helvetica', 'normal');
-    doc.text(`Cliente: ${nombreCliente(facturaDetalle.clienteId)}`, margin, y);
-    doc.text(`Fecha: ${new Date(facturaDetalle.fecha).toLocaleDateString()}`, 400, y);
-    y += 18;
-    doc.text(`IVA aplicado: ${facturaDetalle.aplicarIVA ? 'Sí' : 'No'}`, margin, y);
-    y += 30;
+  // Totales
+  y += 10;
+  doc.setFontSize(12);
+  doc.text(`Subtotal: $${factura.subtotal.toFixed(2)}`, 140, y);
+  y += 8;
+  doc.text(`IVA (22%): $${factura.aplicarIVA ? factura.iva.toFixed(2) : '0.00'}`, 140, y);
+  y += 8;
 
-    // Línea separadora
-    doc.setDrawColor(0);
-    doc.setLineWidth(0.5);
-    doc.line(margin, y, 555, y);
-    y += 15;
+  doc.setFontSize(14);
+  doc.setFont('helvetica', 'bold');
+  doc.text(`TOTAL: $${(factura.subtotal + (factura.aplicarIVA ? factura.iva : 0)).toFixed(2)}`, 140, y);
 
-    // Tabla encabezado
-    doc.setFont('helvetica', 'bold');
-    doc.setFillColor(230, 230, 230);
-    doc.rect(margin, y - 12, 515, 20, 'F');
-    doc.text('Código', margin + 5, y);
-    doc.text('Producto', margin + 70, y);
-    doc.text('Cantidad', margin + 320, y, null, null, 'right');
-    doc.text('Precio Unit.', margin + 400, y, null, null, 'right');
-    doc.text('Subtotal', margin + 490, y, null, null, 'right');
-    y += 25;
+  // Marca de agua
+  doc.setFontSize(30);
+  doc.setTextColor(240);
+  doc.text('facturasuy.netlify.app', 105, 200, { align: 'center', angle: 20 });
 
-    doc.setFont('helvetica', 'normal');
-
-    facturaDetalle.items.forEach(item => {
-      const p = productoInfo(item.productoId);
-      if (!p) return;
-
-      const precioUnitario = facturaDetalle.aplicarIVA ? p.precio * 1.22 : p.precio;
-      const subtotalItem = precioUnitario * item.cantidad;
-
-      if (y > 750) {
-        doc.addPage();
-        y = margin;
-      }
-
-      doc.text(p.codigo, margin + 5, y);
-      doc.text(p.nombre, margin + 70, y);
-      doc.text(String(item.cantidad), margin + 320, y, null, null, 'right');
-      doc.text(`$${precioUnitario.toFixed(2)}`, margin + 400, y, null, null, 'right');
-      doc.text(`$${subtotalItem.toFixed(2)}`, margin + 490, y, null, null, 'right');
-      y += 20;
-    });
-
-    y += 15;
-
-    // Línea separadora
-    doc.setDrawColor(0);
-    doc.setLineWidth(0.5);
-    doc.line(margin, y, 555, y);
-    y += 20;
-
-    // Totales (alineados a la derecha)
-    doc.setFont('helvetica', 'bold');
-    doc.text('Subtotal:', margin + 390, y, null, null, 'right');
-    doc.setFont('helvetica', 'normal');
-    doc.text(`$${facturaDetalle.subtotal.toFixed(2)}`, margin + 490, y, null, null, 'right');
-    y += 20;
-
-    doc.setFont('helvetica', 'bold');
-    doc.text('IVA (22%):', margin + 390, y, null, null, 'right');
-    doc.setFont('helvetica', 'normal');
-    doc.text(`$${facturaDetalle.iva.toFixed(2)}`, margin + 490, y, null, null, 'right');
-    y += 25;
-
-    doc.setFontSize(14);
-    doc.setFont('helvetica', 'bold');
-    doc.text('Total:', margin + 390, y, null, null, 'right');
-    doc.text(`$${facturaDetalle.total.toFixed(2)}`, margin + 490, y, null, null, 'right');
-
-    // Guardar PDF con nombre claro
-    doc.save(`Factura_${facturaDetalle.id || 'sin_id'}.pdf`);
-  };
+  doc.save(`factura_${factura.id || 'nueva'}.pdf`);
+};
 
   return (
-    <div>
+    <div className="max-w-5xl mx-auto p-4">
       <h2 className="text-xl font-bold mb-4">Historial de Facturas</h2>
 
-      <table className="w-full border-collapse border border-gray-300 max-w-4xl mb-6">
+      <table className="w-full border-collapse border border-gray-300 mb-6">
         <thead>
           <tr>
             <th className="border border-gray-300 px-2 py-1">Cliente</th>
@@ -139,24 +115,29 @@ export default function Historial() {
           </tr>
         </thead>
         <tbody>
-          {facturas.length === 0 && (
-            <tr>
-              <td colSpan="4" className="text-center py-4">No hay facturas</td>
-            </tr>
-          )}
-          {facturas.map(factura => (
-            <tr key={factura.id}>
-              <td className="border border-gray-300 px-2 py-1">{nombreCliente(factura.clienteId)}</td>
-              <td className="border border-gray-300 px-2 py-1">
-                {new Date(factura.fecha).toLocaleDateString()}
-              </td>
-              <td className="border border-gray-300 px-2 py-1">${factura.total.toFixed(2)}</td>
+          {facturas.map(f => (
+            <tr key={f.id}>
+              <td className="border border-gray-300 px-2 py-1">{nombreCliente(f.clienteId)}</td>
+              <td className="border border-gray-300 px-2 py-1">{new Date(f.fecha).toLocaleDateString()}</td>
+              <td className="border border-gray-300 px-2 py-1">${f.total.toFixed(2)}</td>
               <td className="border border-gray-300 px-2 py-1 space-x-2">
                 <button
-                  onClick={() => mostrarDetalle(factura)}
+                  onClick={() => setFacturaDetalle(f)}
                   className="bg-blue-600 text-white px-2 py-1 rounded"
                 >
                   Ver detalle
+                </button>
+                <button
+                  onClick={() => generarPDF(f)}
+                  className="bg-green-600 text-white px-2 py-1 rounded"
+                >
+                  Guardar PDF
+                </button>
+                <button
+                  onClick={() => handleEliminar(f.id)}
+                  className="bg-red-600 text-white px-2 py-1 rounded"
+                >
+                  Eliminar
                 </button>
               </td>
             </tr>
@@ -165,61 +146,52 @@ export default function Historial() {
       </table>
 
       {facturaDetalle && (
-        <div className="border p-4 max-w-4xl rounded shadow bg-white">
-          <h3 className="text-lg font-bold mb-3">Detalle de Factura</h3>
+        <div className="border p-4 rounded shadow max-w-3xl mx-auto bg-white">
+          <h3 className="text-lg font-bold mb-2">Detalle de la factura</h3>
           <p><strong>Cliente:</strong> {nombreCliente(facturaDetalle.clienteId)}</p>
           <p><strong>Fecha:</strong> {new Date(facturaDetalle.fecha).toLocaleDateString()}</p>
-          <p><strong>IVA aplicado:</strong> {facturaDetalle.aplicarIVA ? 'Sí' : 'No'}</p>
 
-          <table className="w-full border-collapse border border-gray-300 my-4">
+          <table className="border-collapse border border-gray-300 w-full mt-4">
             <thead>
-              <tr className="bg-gray-100">
-                <th className="border border-gray-300 px-2 py-1">Código</th>
+              <tr>
                 <th className="border border-gray-300 px-2 py-1">Producto</th>
                 <th className="border border-gray-300 px-2 py-1">Cantidad</th>
-                <th className="border border-gray-300 px-2 py-1">Precio Unit.</th>
+                <th className="border border-gray-300 px-2 py-1">Precio Unitario (sin IVA)</th>
                 <th className="border border-gray-300 px-2 py-1">Subtotal</th>
               </tr>
             </thead>
             <tbody>
               {facturaDetalle.items.map((item, i) => {
-                const p = productoInfo(item.productoId);
-                if (!p) return null;
-                const precioUnitario = facturaDetalle.aplicarIVA ? p.precio * 1.22 : p.precio;
-                const subtotalItem = precioUnitario * item.cantidad;
+                const prod = productos.find(p => p.id === item.productoId);
+                if (!prod) return null;
+
+                const precioUnitario = prod.precio;
+                const subtotalLinea = precioUnitario * item.cantidad;
+
                 return (
                   <tr key={i}>
-                    <td className="border border-gray-300 px-2 py-1">{p.codigo}</td>
-                    <td className="border border-gray-300 px-2 py-1">{p.nombre}</td>
-                    <td className="border border-gray-300 px-2 py-1 text-center">{item.cantidad}</td>
-                    <td className="border border-gray-300 px-2 py-1 text-right">${precioUnitario.toFixed(2)}</td>
-                    <td className="border border-gray-300 px-2 py-1 text-right">${subtotalItem.toFixed(2)}</td>
+                    <td className="border border-gray-300 px-2 py-1">{prod.nombre}</td>
+                    <td className="border border-gray-300 px-2 py-1">{item.cantidad}</td>
+                    <td className="border border-gray-300 px-2 py-1">${precioUnitario.toFixed(2)}</td>
+                    <td className="border border-gray-300 px-2 py-1">${subtotalLinea.toFixed(2)}</td>
                   </tr>
                 );
               })}
             </tbody>
           </table>
 
-          <div className="text-right space-y-1">
+          <div className="mt-4">
             <p><strong>Subtotal:</strong> ${facturaDetalle.subtotal.toFixed(2)}</p>
-            <p><strong>IVA (22%):</strong> ${facturaDetalle.iva.toFixed(2)}</p>
-            <p className="text-xl font-bold"><strong>Total:</strong> ${facturaDetalle.total.toFixed(2)}</p>
+            <p><strong>IVA (22%):</strong> ${facturaDetalle.aplicarIVA ? facturaDetalle.iva.toFixed(2) : '0.00'}</p>
+            <p className="font-bold"><strong>Total:</strong> ${(facturaDetalle.subtotal + (facturaDetalle.aplicarIVA ? facturaDetalle.iva : 0)).toFixed(2)}</p>
           </div>
 
-          <div className="mt-4 flex gap-2">
-            <button
-              onClick={exportarPDF}
-              className="bg-green-600 text-white px-4 py-2 rounded"
-            >
-              Guardar como PDF
-            </button>
-            <button
-              onClick={cerrarDetalle}
-              className="bg-gray-400 px-4 py-2 rounded"
-            >
-              Cerrar
-            </button>
-          </div>
+          <button
+            onClick={() => setFacturaDetalle(null)}
+            className="mt-4 bg-gray-500 text-white px-4 py-2 rounded"
+          >
+            Cerrar detalle
+          </button>
         </div>
       )}
     </div>

@@ -17,8 +17,17 @@ export default function Productos() {
   // Carga productos y draft de localStorage
   useEffect(() => {
     const cargar = async () => {
-      const lista = await obtenerProductos();
-      setProductos(lista);
+      // Intentar obtener desde localStorage
+      const productosLS = localStorage.getItem('productos');
+      if (productosLS) {
+        setProductos(JSON.parse(productosLS));
+      } else {
+        // Si no hay localStorage, carga desde función externa
+        const lista = await obtenerProductos();
+        setProductos(lista);
+        // Guardar en localStorage para persistencia
+        localStorage.setItem('productos', JSON.stringify(lista));
+      }
 
       const draft = localStorage.getItem('productoDraft');
       if (draft) {
@@ -77,11 +86,17 @@ export default function Productos() {
 
     if (editId) {
       await actualizarProducto(editId, productoData);
-      const actualizados = await obtenerProductos();
+      // Actualizar productos en estado y localStorage
+      const actualizados = productos.map((p) =>
+        p.id === editId ? { ...p, ...productoData } : p
+      );
       setProductos(actualizados);
+      localStorage.setItem('productos', JSON.stringify(actualizados));
     } else {
       const nuevo = await agregarProducto(productoData);
-      setProductos([...productos, nuevo]);
+      const nuevosProductos = [...productos, nuevo];
+      setProductos(nuevosProductos);
+      localStorage.setItem('productos', JSON.stringify(nuevosProductos));
     }
 
     resetForm();
@@ -97,10 +112,64 @@ export default function Productos() {
   const handleEliminar = async (id) => {
     if (window.confirm('Deseas eliminar este producto?')) {
       await eliminarProducto(id);
-      const actualizados = await obtenerProductos();
+      const actualizados = productos.filter((p) => p.id !== id);
       setProductos(actualizados);
+      localStorage.setItem('productos', JSON.stringify(actualizados));
       if (editId === id) resetForm();
     }
+  };
+
+  // Descargar backup productos en JSON
+  const descargarBackup = () => {
+    const json = JSON.stringify(productos, null, 2);
+    const blob = new Blob([json], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'backup_productos.json';
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  // Importar backup desde archivo JSON
+  const importarProductos = (event) => {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const productosImportados = JSON.parse(e.target.result);
+
+        if (!Array.isArray(productosImportados)) {
+          alert('El archivo debe contener un arreglo de productos');
+          return;
+        }
+
+        const esValido = productosImportados.every(
+          (p) =>
+            p.codigo && typeof p.codigo === 'string' &&
+            p.nombre && typeof p.nombre === 'string' &&
+            typeof p.precio === 'number'
+        );
+        if (!esValido) {
+          alert('Algunos productos tienen datos inválidos');
+          return;
+        }
+
+        // Guardar en localStorage y actualizar estado
+        localStorage.setItem('productos', JSON.stringify(productosImportados));
+        setProductos(productosImportados);
+
+        alert('Backup cargado correctamente');
+      } catch (error) {
+        alert('Error leyendo el archivo. Asegúrate que sea un JSON válido');
+      }
+    };
+    reader.readAsText(file);
+
+    // Limpiar input para poder cargar mismo archivo si se desea
+    event.target.value = null;
   };
 
   // Filtra productos según búsqueda (por código o nombre)
@@ -202,8 +271,23 @@ export default function Productos() {
           ))}
         </tbody>
       </table>
+
+      {/* Botones para backup y restauración */}
+      <div className="mt-6 max-w-md flex items-center space-x-4">
+        <button
+          onClick={descargarBackup}
+          className="bg-green-600 text-white px-4 py-2 rounded"
+        >
+          Descargar Backup
+        </button>
+
+        <input
+          type="file"
+          accept="application/json"
+          onChange={importarProductos}
+          className="border px-2 py-1"
+        />
+      </div>
     </div>
   );
 }
-// src/pages/Productos.jsx
-// src/pages/Productos.jsx
